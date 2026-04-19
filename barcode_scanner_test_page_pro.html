@@ -238,30 +238,141 @@
       const width=x+quiet;
       return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height+18}" width="${width}" height="${height+18}" role="img" aria-label="Code 128 test barcode"><rect width="${width}" height="${height+18}" fill="#fff"/>${bars.join("")}<text x="${quiet}" y="${height+14}" font-size="10" font-family="Consolas, monospace" fill="#333">${escapeHtml(renderVisibleChars(data))}</text></svg>`;
     }
-    function drawDataMatrixLike(payload){
-      const size=26;
-      const bits=[];
-      for(const ch of payload){const c=ch.charCodeAt(0);for(let b=0;b<8;b++) bits.push((c>>b)&1)}
-      const grid=[];
-      let bi=0;
-      for(let r=0;r<size;r++){
-        for(let c=0;c<size;c++){
-          let on=false;
-          if(c===0||r===size-1) on=true;
-          else if(r===0) on=(c%2===0);
-          else if(c===size-1) on=(r%2===0);
-          else {on=bits[bi % bits.length]===1;bi++;}
-          grid.push(`<div class="dm-cell ${on?'on':''}"></div>`);
+    function gfTables(){
+      const exp=new Array(512).fill(0), log=new Array(256).fill(0);
+      let x=1;
+      for(let i=0;i<255;i++){
+        exp[i]=x; log[x]=i; x<<=1;
+        if(x&0x100) x^=0x12d;
+      }
+      for(let i=255;i<512;i++) exp[i]=exp[i-255];
+      return {exp,log};
+    }
+    const GF = gfTables();
+    function gfMul(a,b){ if(a===0||b===0) return 0; return GF.exp[GF.log[a]+GF.log[b]]; }
+    function dmGeneratorPoly(ecc){
+      let poly=[1];
+      for(let i=1;i<=ecc;i++){
+        const next=new Array(poly.length+1).fill(0);
+        for(let j=0;j<poly.length;j++){
+          next[j] ^= poly[j];
+          next[j+1] ^= gfMul(poly[j], GF.exp[i]);
+        }
+        poly=next;
+      }
+      return poly;
+    }
+    function dmAsciiEncode(text){
+      const out=[232]; // GS1 FNC1 lead
+      for(let i=0;i<text.length;i++){
+        const a=text.charCodeAt(i), b=text.charCodeAt(i+1);
+        if(a>=48&&a<=57&&b>=48&&b<=57){ out.push(130 + ((a-48)*10 + (b-48))); i++; continue; }
+        out.push((a+1)&0xff);
+      }
+      return out;
+    }
+    function dmRandomize253State(cw,pos){
+      const pseudo=((149*pos)%253)+1;
+      let temp=cw+pseudo;
+      if(temp>254) temp-=254;
+      return temp;
+    }
+    function dmEcc(data,eccCount){
+      const gen=dmGeneratorPoly(eccCount);
+      const msg=data.concat(new Array(eccCount).fill(0));
+      for(let i=0;i<data.length;i++){
+        const coef=msg[i];
+        if(coef===0) continue;
+        for(let j=1;j<gen.length;j++) msg[i+j] ^= gfMul(gen[j], coef);
+      }
+      return msg.slice(msg.length-eccCount);
+    }
+    function placeBit(m, r, c, rows, cols, cw, bit){
+      if(r<0){r+=rows; c+=4-((rows+4)%8);}
+      if(c<0){c+=cols; r+=4-((cols+4)%8);}
+      if(m[r][c]===null) m[r][c]=((cw & (1<<(8-bit)))!==0) ? 1 : 0;
+    }
+    function utah(m,r,c,rows,cols,cw){
+      placeBit(m,r-2,c-2,rows,cols,cw,1); placeBit(m,r-2,c-1,rows,cols,cw,2);
+      placeBit(m,r-1,c-2,rows,cols,cw,3); placeBit(m,r-1,c-1,rows,cols,cw,4);
+      placeBit(m,r-1,c,rows,cols,cw,5);   placeBit(m,r,c-2,rows,cols,cw,6);
+      placeBit(m,r,c-1,rows,cols,cw,7);   placeBit(m,r,c,rows,cols,cw,8);
+    }
+    function corner1(m,rows,cols,cw){
+      placeBit(m,rows-1,0,rows,cols,cw,1); placeBit(m,rows-1,1,rows,cols,cw,2);
+      placeBit(m,rows-1,2,rows,cols,cw,3); placeBit(m,0,cols-2,rows,cols,cw,4);
+      placeBit(m,0,cols-1,rows,cols,cw,5); placeBit(m,1,cols-1,rows,cols,cw,6);
+      placeBit(m,2,cols-1,rows,cols,cw,7); placeBit(m,3,cols-1,rows,cols,cw,8);
+    }
+    function corner2(m,rows,cols,cw){
+      placeBit(m,rows-3,0,rows,cols,cw,1); placeBit(m,rows-2,0,rows,cols,cw,2);
+      placeBit(m,rows-1,0,rows,cols,cw,3); placeBit(m,0,cols-4,rows,cols,cw,4);
+      placeBit(m,0,cols-3,rows,cols,cw,5); placeBit(m,0,cols-2,rows,cols,cw,6);
+      placeBit(m,0,cols-1,rows,cols,cw,7); placeBit(m,1,cols-1,rows,cols,cw,8);
+    }
+    function corner3(m,rows,cols,cw){
+      placeBit(m,rows-3,0,rows,cols,cw,1); placeBit(m,rows-2,0,rows,cols,cw,2);
+      placeBit(m,rows-1,0,rows,cols,cw,3); placeBit(m,0,cols-2,rows,cols,cw,4);
+      placeBit(m,0,cols-1,rows,cols,cw,5); placeBit(m,1,cols-1,rows,cols,cw,6);
+      placeBit(m,2,cols-1,rows,cols,cw,7); placeBit(m,3,cols-1,rows,cols,cw,8);
+    }
+    function corner4(m,rows,cols,cw){
+      placeBit(m,rows-1,0,rows,cols,cw,1); placeBit(m,rows-1,cols-1,rows,cols,cw,2);
+      placeBit(m,0,cols-3,rows,cols,cw,3); placeBit(m,0,cols-2,rows,cols,cw,4);
+      placeBit(m,0,cols-1,rows,cols,cw,5); placeBit(m,1,cols-3,rows,cols,cw,6);
+      placeBit(m,1,cols-2,rows,cols,cw,7); placeBit(m,1,cols-1,rows,cols,cw,8);
+    }
+    function dmPlace(codewords, rows=22, cols=22){
+      const m=Array.from({length:rows},()=>Array(cols).fill(null));
+      let r=4,c=0,idx=0;
+      do{
+        if(r===rows && c===0) corner1(m,rows,cols,codewords[idx++]||0);
+        if(r===rows-2 && c===0 && (cols%4)!==0) corner2(m,rows,cols,codewords[idx++]||0);
+        if(r===rows-2 && c===0 && (cols%8)===4) corner3(m,rows,cols,codewords[idx++]||0);
+        if(r===rows+4 && c===2 && (cols%8)===0) corner4(m,rows,cols,codewords[idx++]||0);
+        do{
+          if(r<rows && c>=0 && m[r][c]===null) utah(m,r,c,rows,cols,codewords[idx++]||0);
+          r-=2; c+=2;
+        }while(r>=0 && c<cols);
+        r+=1; c+=3;
+        do{
+          if(r>=0 && c<cols && m[r][c]===null) utah(m,r,c,rows,cols,codewords[idx++]||0);
+          r+=2; c-=2;
+        }while(r<rows && c>=0);
+        r+=3; c+=1;
+      }while(r<rows || c<cols);
+      if(m[rows-1][cols-1]===null){ m[rows-1][cols-1]=1; m[rows-2][cols-2]=1; }
+      for(let y=0;y<rows;y++) for(let x=0;x<cols;x++) if(m[y][x]===null) m[y][x]=0;
+      return m;
+    }
+    function drawDataMatrixSvg(payload){
+      const DATA_CAP=36, ECC=24, symbolSize=24, module=6, quiet=2;
+      const data=dmAsciiEncode(payload);
+      if(data.length>DATA_CAP) return `<div class="small">DataMatrix payload too long for embedded symbol profile.</div>`;
+      if(data.length<DATA_CAP) data.push(129);
+      while(data.length<DATA_CAP) data.push(dmRandomize253State(129,data.length+1));
+      const codewords=data.concat(dmEcc(data,ECC));
+      const placed=dmPlace(codewords,22,22);
+      const full=Array.from({length:symbolSize},()=>Array(symbolSize).fill(0));
+      for(let r=0;r<symbolSize;r++){
+        for(let c=0;c<symbolSize;c++){
+          if(c===0 || r===symbolSize-1) full[r][c]=1;
+          else if(r===0) full[r][c]=(c%2===0)?1:0;
+          else if(c===symbolSize-1) full[r][c]=(r%2===0)?1:0;
+          else full[r][c]=placed[r-1][c-1];
         }
       }
-      return `<div class="dm-grid" style="--n:${size}" role="img" aria-label="DataMatrix-style 2D test symbol">${grid.join("")}</div>`;
+      const size=(symbolSize+quiet*2)*module;
+      let rects='';
+      for(let r=0;r<symbolSize;r++) for(let c=0;c<symbolSize;c++) if(full[r][c]) rects += `<rect x="${(c+quiet)*module}" y="${(r+quiet)*module}" width="${module}" height="${module}" fill="#111"/>`;
+      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}" width="${size}" height="${size}" role="img" aria-label="GS1 DataMatrix test symbol"><rect width="${size}" height="${size}" fill="#fff"/>${rects}</svg>`;
     }
     function renderTestSymbols(){
       const grid=el("testSymbolsGrid");
       grid.innerHTML=barcodeShowcase.map(s=>{
-        const visual=s.symbology==="GS1 DataMatrix" ? drawDataMatrixLike(s.data) : drawCode128Svg(s.data, true);
+        const visual=s.symbology==="GS1 DataMatrix" ? drawDataMatrixSvg(s.data) : drawCode128Svg(s.data, true);
         const note=s.symbology==="GS1 DataMatrix"
-          ? "2D matrix test visual for scanner behavior checks. Verify decode output in the capture panel."
+          ? "Real generated GS1 DataMatrix symbol for 2D scanner testing."
           : "Linear GS1-128 symbol for direct wedge-scanner testing.";
         return `<article class="symbol-card"><div class="symbol-title">${s.title}</div><div class="symbol-ai">${s.ai}</div><p class="small" style="margin-bottom:8px"><strong>Symbol:</strong> ${s.symbology}</p><div class="symbol-wrap">${visual}</div><p class="small" style="margin-top:8px">${note}</p><button data-sample="${s.id}" class="use-symbol-btn" style="margin-top:8px">Use this payload in analyzer</button></article>`;
       }).join("");
@@ -328,7 +439,7 @@
 
     function parseGS1(value){
       const payload=stripPrefix(value).replace(/\n/g,"").trim().replace(/~/g,GS);
-      const out=[],errors=[],warnings=[]; let i=0;
+      const out=[],errors=[],warnings=[]; let i=0, varBoundaryRisk=false;
       while(i<payload.length){
         if(payload.charCodeAt(i)===29){i+=1;continue}
         const ai=payload.slice(i,i+2),spec=aiSpecs[ai];
@@ -338,9 +449,9 @@
         if(spec.fixed){valuePart=payload.slice(i,i+spec.fixed);i+=spec.fixed;if(valuePart.length!==spec.fixed)errors.push(`AI ${ai} incomplete. Expected ${spec.fixed} chars, got ${valuePart.length}.`)}
         else {
           const parsed=parseVariableValue(payload,i,spec.variable);valuePart=parsed.value;i=parsed.nextIndex;meta=parsed;
-          if(parsed.truncated)warnings.push(`AI ${ai} reached max length (${spec.variable}) before separator.`);
-          if(parsed.terminatedByAI&&!parsed.terminatedByGS)warnings.push(`AI ${ai} inferred boundary from next AI, not explicit GS separator.`);
-          if(!parsed.terminatedByGS && !parsed.terminatedByAI && i<payload.length)warnings.push(`AI ${ai} may have ambiguous termination.`);
+          if(parsed.truncated){warnings.push(`AI ${ai} reached max length (${spec.variable}) before separator.`); varBoundaryRisk=true;}
+          if(parsed.terminatedByAI&&!parsed.terminatedByGS){warnings.push(`AI ${ai} inferred boundary from next AI, not explicit GS separator.`); varBoundaryRisk=true;}
+          if(!parsed.terminatedByGS && !parsed.terminatedByAI && i<payload.length){warnings.push(`AI ${ai} may have ambiguous termination.`); varBoundaryRisk=true;}
         }
         const ok=spec.validator(valuePart);
         out.push({ai,label:spec.label,value:valuePart,valid:ok,help:spec.help});
@@ -348,7 +459,7 @@
       }
       const hasCore=out.some(x=>x.ai==="01")&&out.some(x=>x.ai==="17");
       const varAIPresent=out.some(x=>variableAIs.has(x.ai));
-      return {parsed:out,errors,warnings,status:out.length?(errors.length?"Partial":"Parsed"):"Failed",hasCore,varAIPresent};
+      return {parsed:out,errors,warnings,status:out.length?(errors.length?"Partial":"Parsed"):"Failed",hasCore,varAIPresent,varBoundaryRisk};
     }
 
     function computeVerdict(analysis,value){
@@ -356,7 +467,7 @@
       const separator=analysis.separator.verdict;
       const parse=analysis.parsed;
       const hasUnknownCtrl=/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/.test(value.replace(new RegExp(GS,"g"),""));
-      const variableRisk=parse.varAIPresent&&separator==="Not suitable";
+      const variableRisk=parse.varBoundaryRisk || (separator==="Not suitable" && parse.varAIPresent && parse.parsed.some(x=>variableAIs.has(x.ai) && x.value===""));
 
       let finalVerdict="Not suitable",readiness="Not ready",breakdown="Needs different hardware",reasons=[];
 
