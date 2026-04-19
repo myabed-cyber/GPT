@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GS1 / FO Barcode Scanner Validation</title>
+  <style>
+    :root {
+      --bg: #f4f7fb;
+      --card: #fff;
+      --text: #142136;
+      --muted: #5f6b7f;
+      --primary: #1f6feb;
+      --good: #12805c;
+      --warn: #b26f00;
+      --bad: #b42318;
+      --border: #dbe3ee;
+      --shadow: 0 8px 24px rgba(17, 24, 39, .08);
+      --radius: 14px;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;font-family:"Segoe UI",Roboto,Arial,sans-serif;background:var(--bg);color:var(--text);line-height:1.45}
+    .container{width:min(1240px,96vw);margin:24px auto 48px;display:grid;gap:16px}
+    .card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);padding:18px}
+    h1,h2,h3,h4,p{margin:0}.header h1{font-size:clamp(1.55rem,2.4vw,2rem)}.header p{margin-top:8px;color:var(--muted)}
+    .grid-5,.grid-4,.grid-3,.grid-2{display:grid;gap:12px}.grid-5{grid-template-columns:repeat(5,minmax(0,1fr))}.grid-4{grid-template-columns:repeat(4,minmax(0,1fr))}.grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}
+    .summary-card{background:linear-gradient(180deg,#fff,#f8fbff);border:1px solid var(--border);border-radius:12px;padding:12px}
+    .summary-card h4{font-size:.84rem;color:var(--muted)}.summary-value{margin-top:8px;font-size:1rem;font-weight:700}
+    .badge{display:inline-flex;align-items:center;gap:6px;font-size:.79rem;font-weight:700;border-radius:999px;padding:4px 9px;border:1px solid}
+    .good{color:var(--good);border-color:#9cd7c3;background:#eefaf5}.warn{color:var(--warn);border-color:#f4cc87;background:#fff7ea}.bad{color:var(--bad);border-color:#f5b8b4;background:#fff2f1}.neutral{color:#394150;border-color:#c9d2e2;background:#f5f8fc}
+    .section-title{margin-bottom:12px}.section-title p{margin-top:6px;color:var(--muted);font-size:.94rem}
+    .controls{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0}
+    button{border:1px solid #c7d4e6;background:#fff;color:var(--text);border-radius:10px;padding:8px 12px;cursor:pointer;font-weight:600}
+    button.primary{background:var(--primary);color:#fff;border-color:var(--primary)}button:hover{filter:brightness(.98)}
+    .scanner-input{width:100%;min-height:90px;border:1px solid var(--border);border-radius:10px;padding:12px;font-size:1.04rem;font-family:"Consolas","Courier New",monospace;resize:vertical;background:#fcfdff}
+    .mono{font-family:"Consolas","Courier New",monospace;background:#f8fbff;border:1px solid var(--border);border-radius:10px;padding:12px;min-height:64px;word-break:break-word;white-space:pre-wrap}
+    table{width:100%;border-collapse:collapse;font-size:.9rem}th,td{border-bottom:1px solid var(--border);padding:8px 6px;text-align:left;vertical-align:top}th{background:#f8fbff;font-size:.82rem;color:#33415a}
+    .kv{display:grid;grid-template-columns:200px 1fr;gap:8px;margin:6px 0;align-items:center;font-size:.93rem}.muted{color:var(--muted)}
+    .list{margin:0;padding-left:18px;color:#273244}.catalog-card{border:1px solid var(--border);border-radius:12px;padding:12px;background:#fff}
+    .search-row{display:flex;gap:8px;margin-bottom:10px}.search-row input{flex:1;border:1px solid var(--border);border-radius:10px;padding:8px 10px;font-size:.94rem;background:#fcfdff}
+    .small{font-size:.84rem;color:var(--muted)}
+    .symbol-card{border:1px solid var(--border);border-radius:12px;padding:12px;background:#fff}
+    .symbol-wrap{border:1px dashed #b5c7e0;border-radius:10px;padding:8px;background:#fff;overflow:auto}
+    .symbol-title{font-size:.95rem;font-weight:700}
+    .symbol-ai{font-family:"Consolas","Courier New",monospace;font-size:.83rem;color:#33415a;margin:4px 0 8px}
+    .dm-grid{display:grid;grid-template-columns:repeat(var(--n),6px);grid-auto-rows:6px;gap:1px;background:#fff;padding:8px;border:1px solid #111;width:max-content}
+    .dm-cell{width:6px;height:6px;background:#fff}
+    .dm-cell.on{background:#111}
+    @media (max-width:1080px){.grid-5,.grid-4,.grid-3{grid-template-columns:repeat(2,minmax(0,1fr))}}
+    @media (max-width:760px){.grid-5,.grid-4,.grid-3,.grid-2{grid-template-columns:1fr}.kv{grid-template-columns:1fr}}
+    @media print{
+      body{background:#fff}
+      .card{box-shadow:none;border-color:#999}
+      #printableSymbols{break-inside:avoid}
+      .controls, #catalogFilter{display:none !important}
+    }
+  </style>
+</head>
+<body>
+  <main class="container">
+    <section class="card header">
+      <h1>GS1 / FO Barcode Scanner Validation</h1>
+      <p>This tool validates whether a scanner can support Dynamics 365 FO GS1 workflows by checking raw output, AIM prefix, separator handling, and GS1 AI parsing behavior.</p>
+      <div class="grid-5" id="summaryCards" style="margin-top:14px"></div>
+    </section>
+
+    <section class="card">
+      <div class="section-title">
+        <h2>Live Scanner Capture</h2>
+        <p>Focus the input area, scan in keyboard-wedge mode, and review exact output with control-character visibility.</p>
+      </div>
+      <textarea id="scanInput" class="scanner-input" placeholder="Click here and scan a barcode..."></textarea>
+      <div class="controls">
+        <button class="primary" id="clearBtn">Clear</button>
+        <button id="copyBtn">Copy raw output</button>
+        <button id="sample128Btn">Sample: GS1-128</button>
+        <button id="sampleDmBtn">Sample: GS1 DataMatrix</button>
+        <button id="sampleSerialBtn">Sample: Serial focused</button>
+        <button id="sampleBadBtn">Sample: Malformed</button>
+      </div>
+      <div class="grid-2">
+        <div>
+          <h3>Rendered Output</h3>
+          <div id="renderedOutput" class="mono"></div>
+          <p class="small" id="autoEnterStatus" style="margin-top:8px"></p>
+        </div>
+        <div>
+          <h3>Raw Output (escaped + visible control chars)</h3>
+          <div id="rawOutput" class="mono"></div>
+          <p class="small" style="margin-top:8px">Legend: ␝=GS(29), ␍=CR(13), ␊=LF(10), ⇥=TAB(9), ·=SPACE.</p>
+        </div>
+      </div>
+      <h3 style="margin-top:12px">Character Inspection</h3>
+      <table>
+        <thead><tr><th>Index</th><th>Character</th><th>Char code</th><th>Meaning</th></tr></thead>
+        <tbody id="charTableBody"></tbody>
+      </table>
+    </section>
+
+    <section class="card">
+      <div class="section-title"><h2>GS1 / FO Diagnostic Results</h2></div>
+      <div class="grid-2">
+        <div><h3>Prefix / Symbology Detection</h3><div id="prefixPanel"></div></div>
+        <div><h3>Group Separator / FNC1 Handling</h3><div id="separatorPanel"></div></div>
+      </div>
+      <div style="margin-top:12px"><h3>GS1 Parser Output</h3><div id="parserPanel"></div></div>
+      <div style="margin-top:12px"><h3>FO Suitability Verdict</h3><div id="verdictPanel"></div></div>
+    </section>
+
+    <section class="card" id="printableSymbols">
+      <div class="section-title">
+        <h2>Built-in Scannable Test Symbols</h2>
+        <p>Use these on-screen or printed symbols for practical scanner validation before FO pilot testing. Labels show intended AI content.</p>
+      </div>
+      <div class="grid-2" id="testSymbolsGrid"></div>
+      <p class="small" style="margin-top:8px">Tip: print at 100% scale, avoid browser shrink-to-fit, and keep strong contrast for reliable decode testing.</p>
+    </section>
+
+    <section class="card">
+      <div class="section-title">
+        <h2>Recommended Scanner Types and Popular Device Families</h2>
+        <p>Use this as pilot planning guidance. Real FO suitability is typically confirmed only through live scenario testing.</p>
+      </div>
+      <h3 style="margin-bottom:10px">Recommended scanner types</h3>
+      <div class="grid-4" id="typeCatalog"></div>
+      <h3 style="margin:14px 0 8px">Popular device families</h3>
+      <div class="search-row"><input id="catalogFilter" placeholder="Filter by brand, model, class, or use case..." /></div>
+      <table>
+        <thead><tr><th>Brand</th><th>Model family</th><th>Device class</th><th>Typical fit</th><th>Expected 2D capability</th><th>Best for</th><th>Recommendation note</th></tr></thead>
+        <tbody id="deviceCatalogBody"></tbody>
+      </table>
+      <p class="small" style="margin-top:8px">These families are commonly used in warehousing. They are not guarantees of compatibility; verify with your exact FO process, scanner profile, and barcode set.</p>
+    </section>
+
+    <section class="card">
+      <div class="section-title"><h2>Decision Checklist</h2></div>
+      <h3>A scanner is usually sufficient if:</h3>
+      <ul class="list" style="margin-top:8px">
+        <li>it reads GS1 DataMatrix</li><li>it reads GS1-128</li><li>it outputs a usable AIM prefix</li><li>it preserves or maps group separator correctly</li><li>it works consistently as keyboard wedge or similar input</li><li>it supports FO pilot scenarios without broken output</li>
+      </ul>
+    </section>
+
+    <section class="card">
+      <div class="section-title"><h2>Session Log and Export</h2></div>
+      <div class="controls"><button id="addLogBtn">Add current scan to log</button><button id="exportTxtBtn">Export TXT</button><button id="exportJsonBtn">Export JSON</button><button id="clearLogBtn">Clear log</button></div>
+      <table>
+        <thead><tr><th>Timestamp</th><th>Prefix</th><th>Separator</th><th>Verdict</th><th>Raw output</th></tr></thead>
+        <tbody id="logTableBody"></tbody>
+      </table>
+    </section>
+  </main>
+
+  <script>
+    const GS = String.fromCharCode(29);
+    const sampleScans = {
+      gs1128: `]C101095011015300031710260110LOT-A1${GS}21300123`,
+      gs1dm: `]d201095011015300031710260110LOT-DM~21300124`,
+      serial: `]Q301095011015300031721SN-AX9988~17261231`,
+      malformed: `]C10195011015300031710BADDATE10`
+    };
+    const barcodeShowcase = [
+      { id:"sym-gs1128", title:"GS1-128 sample", ai:"(01)09501101530003(17)261031(10)LOT-A1(21)300123", symbology:"GS1-128", data:`01095011015300031726103110LOT-A1${GS}21300123` },
+      { id:"sym-gs1dm", title:"GS1 DataMatrix sample", ai:"(01)09501101530003(17)261031(10)LOT-DM(21)300124", symbology:"GS1 DataMatrix", data:`01095011015300031726103110LOT-DM${GS}21300124` },
+      { id:"sym-lot", title:"GTIN + Expiry + Lot sample", ai:"(01)09501101530003(17)261231(10)BATCH-77", symbology:"GS1-128", data:`01095011015300031726123110BATCH-77` },
+      { id:"sym-serial", title:"GTIN + Serial sample", ai:"(01)09501101530003(21)SN-AX9988", symbology:"GS1-128", data:`010950110153000321SN-AX9988` },
+      { id:"sym-bad", title:"Malformed sample (negative test)", ai:"(01)09501101530003(17)BADDATE(10)", symbology:"GS1-128 malformed", data:`010950110153000317BADDATE10` }
+    ];
+    const CODE128_PATTERNS = [
+      "212222","222122","222221","121223","121322","131222","122213","122312","132212","221213","221312","231212","112232","122132","122231","113222","123122","123221","223211","221132","221231","213212","223112","312131","311222","321122","321221","312212","322112","322211","212123","212321","232121","111323","131123","131321","112313","132113","132311","211313","231113","231311","112133","112331","132131","113123","113321","133121","313121","211331","231131","213113","213311","213131","311123","311321","331121","312113","312311","332111","314111","221411","431111","111224","111422","121124","121421","141122","141221","112214","112412","122114","122411","142112","142211","241211","221114","413111","241112","134111","111242","121142","121241","114212","124112","124211","411212","421112","421211","212141","214121","412121","111143","111341","131141","114113","114311","411113","411311","113141","114131","311141","411131","211412","211214","211232","2331112"
+    ];
+
+    const aiSpecs = {
+      "01": { label: "GTIN", fixed: 14, validator: v => /^\d{14}$/.test(v), help: "14 numeric digits" },
+      "17": { label: "Expiry (YYMMDD)", fixed: 6, validator: v => /^\d{6}$/.test(v), help: "YYMMDD" },
+      "10": { label: "Lot / Batch", variable: 20, validator: v => v.length > 0, help: "Variable up to 20 chars" },
+      "21": { label: "Serial", variable: 20, validator: v => v.length > 0, help: "Variable up to 20 chars" },
+      "30": { label: "Quantity", variable: 8, validator: v => /^\d{1,8}$/.test(v), help: "1-8 numeric digits" },
+      "37": { label: "Count", variable: 8, validator: v => /^\d{1,8}$/.test(v), help: "1-8 numeric digits" }
+    };
+    const knownAIs = Object.keys(aiSpecs);
+    const variableAIs = new Set(["10", "21", "30", "37"]);
+
+    const scannerTypes = [
+      {name:"Rugged Android mobile computer with built-in 2D imager",suitability:"High",useCase:"Warehouse picking, receiving, replenishment",advantages:"Integrated device, enterprise management support, robust scanning",limitations:"Higher device cost, mobile lifecycle planning needed",recommendation:"Commonly recommended for FO GS1 workflows when correctly configured."},
+      {name:"2D handheld scanner connected to Android device",suitability:"High",useCase:"Station or cart-based scanning",advantages:"Flexible deployment, strong decode engines available",limitations:"Cable/Bluetooth management, input profile tuning required",recommendation:"Typically suitable for FO GS1 pilots with proper keyboard-wedge settings."},
+      {name:"Wearable / ring 2D scanner",suitability:"Medium",useCase:"High-motion picking workflows",advantages:"Hands-free operation, ergonomic for repetitive scans",limitations:"Can require careful pairing and data mode configuration",recommendation:"Often suitable where speed is critical; verify FO behavior in realistic tests."},
+      {name:"1D-only scanner",suitability:"Low",useCase:"Simple linear barcode environments",advantages:"Lower cost, straightforward usage",limitations:"Usually cannot decode GS1 DataMatrix and may limit future requirements",recommendation:"Usually not sufficient for GS1 DataMatrix-based FO workflows."}
+    ];
+
+    const deviceFamilies = [
+      ["Zebra","TC53 / TC58","Rugged mobile computer","Warehouse mobility","Typically strong 2D","End-to-end mobile scanning","Widely known in warehousing; typically suitable when correctly configured; verify in FO testing."],
+      ["Zebra","MC3300ax","Rugged mobile computer","Legacy-to-modern warehouse operations","Typically strong 2D","Gun-style high-volume scanning","Common FO candidate in distribution settings; validate profile/output mapping."],
+      ["Honeywell","CT47","Rugged mobile computer","Enterprise mobility","Expected 2D support","Mixed warehouse + transport","Commonly used in logistics; suitability depends on scanner and keyboard profile."],
+      ["Honeywell","CK65","Rugged mobile computer","Warehouse core operations","Expected 2D support","Long-shift scanning","Widely deployed class; typically suitable when separator behavior is validated."],
+      ["Datalogic","Skorpio X5","Rugged mobile computer","Industrial warehouse","Expected 2D support","Harsh environment handling","Known industrial family; verify AIM prefix and GS mapping in FO scenarios."],
+      ["Datalogic","Memor 12 / Memor 17","Mobile computer","Light-to-medium warehouse tasks","Expected 2D support","Flexible mobility use","Commonly considered for mobile workflows; confirm decode and wedge settings."],
+      ["Zebra","DS3600 Series","Industrial handheld scanner","Fixed stations / rugged points","Strong 2D on 2D models","Harsh duty handheld scanning","Widely known rugged line; evaluate exact model and GS1 profile."],
+      ["Honeywell","Granit XP Series","Industrial handheld scanner","Warehouse and yard","Strong 2D on 2D models","Distance and damaged codes","Common industrial option; FO readiness depends on output configuration."],
+      ["Datalogic","PowerScan 9600","Industrial handheld scanner","Production + logistics","Strong 2D on 2D models","Industrial decode reliability","Typically suitable in industrial environments with proper symbology setup."],
+      ["ProGlove","MARK Display","Wearable scanner","Hands-free workflows","Expected 2D depending on variant","Fast pick/pack execution","Wearable option commonly evaluated for ergonomics; confirm FO parser compatibility in pilot."]
+    ];
+
+    const state = { lastScan:"", lastResult:null, log:[] };
+    const el = id => document.getElementById(id);
+
+    function badgeClass(v){if(["Suitable","Good","Ready","High","Detected","Parsed","Auto-Enter likely"].includes(v))return"good";if(["Suitable with configuration","Acceptable with configuration","Partial","Warning","Medium"].includes(v))return"warn";if(["Not suitable","Missing","Failed","Low","Not ready"].includes(v))return"bad";return"neutral"}
+    function createBadge(text){return `<span class="badge ${badgeClass(text)}">${text}</span>`}
+    function escapeHtml(v){return (v||"").replace(/[&<>"]|'/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[m]))}
+    function normalizeInput(raw){return raw.replace(/\r\n/g,"\n").replace(/\r/g,"\n")}
+    function renderVisibleChars(value){return value.replace(new RegExp(GS,"g"),"␝").replace(/\n/g,"␊\n").replace(/\r/g,"␍").replace(/\t/g,"⇥").replace(/ /g,"·")}
+    function code128Value(ch){const cc=ch.charCodeAt(0);return cc>=32&&cc<=126?cc-32:null}
+    function buildCode128Codes(data, withGS1Fnc1=true){
+      const codes=[104];
+      if(withGS1Fnc1) codes.push(102);
+      for(const ch of data){
+        if(ch===GS){codes.push(102);continue}
+        const v=code128Value(ch);
+        if(v===null) continue;
+        codes.push(v);
+      }
+      let checksum=codes[0];
+      for(let i=1;i<codes.length;i++) checksum += codes[i]*i;
+      codes.push(checksum % 103, 106);
+      return codes;
+    }
+    function drawCode128Svg(data, withGS1Fnc1=true){
+      const codes=buildCode128Codes(data, withGS1Fnc1);
+      const module=2, quiet=20, height=90;
+      let x=quiet, bars=[];
+      for(const code of codes){
+        const pattern=CODE128_PATTERNS[code] || "";
+        for(let i=0;i<pattern.length;i++){
+          const w=parseInt(pattern[i],10)*module;
+          if(i%2===0) bars.push(`<rect x="${x}" y="0" width="${w}" height="${height}" fill="#111"/>`);
+          x+=w;
+        }
+      }
+      const width=x+quiet;
+      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height+18}" width="${width}" height="${height+18}" role="img" aria-label="Code 128 test barcode"><rect width="${width}" height="${height+18}" fill="#fff"/>${bars.join("")}<text x="${quiet}" y="${height+14}" font-size="10" font-family="Consolas, monospace" fill="#333">${escapeHtml(renderVisibleChars(data))}</text></svg>`;
+    }
+    function drawDataMatrixLike(payload){
+      const size=26;
+      const bits=[];
+      for(const ch of payload){const c=ch.charCodeAt(0);for(let b=0;b<8;b++) bits.push((c>>b)&1)}
+      const grid=[];
+      let bi=0;
+      for(let r=0;r<size;r++){
+        for(let c=0;c<size;c++){
+          let on=false;
+          if(c===0||r===size-1) on=true;
+          else if(r===0) on=(c%2===0);
+          else if(c===size-1) on=(r%2===0);
+          else {on=bits[bi % bits.length]===1;bi++;}
+          grid.push(`<div class="dm-cell ${on?'on':''}"></div>`);
+        }
+      }
+      return `<div class="dm-grid" style="--n:${size}" role="img" aria-label="DataMatrix-style 2D test symbol">${grid.join("")}</div>`;
+    }
+    function renderTestSymbols(){
+      const grid=el("testSymbolsGrid");
+      grid.innerHTML=barcodeShowcase.map(s=>{
+        const visual=s.symbology==="GS1 DataMatrix" ? drawDataMatrixLike(s.data) : drawCode128Svg(s.data, true);
+        const note=s.symbology==="GS1 DataMatrix"
+          ? "2D matrix test visual for scanner behavior checks. Verify decode output in the capture panel."
+          : "Linear GS1-128 symbol for direct wedge-scanner testing.";
+        return `<article class="symbol-card"><div class="symbol-title">${s.title}</div><div class="symbol-ai">${s.ai}</div><p class="small" style="margin-bottom:8px"><strong>Symbol:</strong> ${s.symbology}</p><div class="symbol-wrap">${visual}</div><p class="small" style="margin-top:8px">${note}</p><button data-sample="${s.id}" class="use-symbol-btn" style="margin-top:8px">Use this payload in analyzer</button></article>`;
+      }).join("");
+      grid.querySelectorAll(".use-symbol-btn").forEach(btn=>{
+        btn.addEventListener("click",()=>{
+          const s=barcodeShowcase.find(x=>x.id===btn.dataset.sample);
+          if(!s) return;
+          const input = s.symbology==="GS1 DataMatrix" ? `]d2${s.data.replace(new RegExp(GS,'g'),'~')}` : `]C1${s.data}`;
+          setSample(input);
+        });
+      });
+    }
+
+    function captureInput(rawInput){
+      const value=normalizeInput(rawInput);state.lastScan=value;
+      const analysis={prefix:detectPrefix(value),separator:detectSeparator(value),parsed:parseGS1(value),chars:analyzeCharacters(value)};
+      analysis.verdict=computeVerdict(analysis,value);state.lastResult=analysis;
+      renderRawOutput(value);renderCharacterTable(analysis.chars);renderPanels(analysis);renderSummary(analysis);
+    }
+
+    function renderRawOutput(value){
+      const escaped=JSON.stringify(value||"").slice(1,-1).replace(/\\u001d/g,"\\u001d(␝)").replace(/\\n/g,"\\n(␊)").replace(/\\r/g,"\\r(␍)").replace(/\\t/g,"\\t(⇥)");
+      el("renderedOutput").textContent=renderVisibleChars(value)||"(no content)";
+      el("rawOutput").textContent=escaped||"(empty string)";
+      const autoEnter=/\n$/.test(value);
+      el("autoEnterStatus").innerHTML=`Auto-enter behavior: ${createBadge(autoEnter?"Auto-Enter likely":"Not detected")}`;
+    }
+
+    function analyzeCharacters(value){return [...value].map((ch,index)=>{const code=ch.charCodeAt(0);let meaning="Printable";if(code===29)meaning="GS (ASCII 29) / FNC1 separator";else if(code===10)meaning="LF (line feed / Enter)";else if(code===13)meaning="CR (carriage return)";else if(code===9)meaning="TAB";else if(code<32)meaning="Control character";else if(ch==="~")meaning="Printable separator placeholder";return {index,char:ch,code,meaning}})}
+
+    function renderCharacterTable(chars){
+      const body=el("charTableBody");
+      if(!chars.length){body.innerHTML=`<tr><td colspan="4" class="muted">No characters yet.</td></tr>`;return}
+      body.innerHTML=chars.map(c=>{const disp=c.code===29?"␝":c.code===10?"␊":c.code===13?"␍":c.code===9?"⇥":(c.char===" "?"␠":escapeHtml(c.char));return `<tr><td>${c.index}</td><td>${disp}</td><td>${c.code}</td><td>${escapeHtml(c.meaning)}</td></tr>`}).join("")
+    }
+
+    function detectPrefix(value){
+      const match=value.match(/^](C1|d2|Q3)/);if(!match)return {detected:"Missing",family:"Unknown",suitable:"Warning",note:"No AIM prefix detected. FO can still parse data, but symbology-specific routing and diagnostics are less reliable."};
+      const code=`]${match[1]}`;const family=code==="]C1"?"GS1-128":code==="]d2"?"GS1 DataMatrix":"GS1 QR";
+      return {detected:code,family,suitable:"Detected",note:`${code} detected. This is commonly useful for FO GS1 diagnostics and barcode-family tracing.`};
+    }
+
+    function detectSeparator(value){
+      const hasGS=value.includes(GS),hasTilde=value.includes("~");
+      if(hasGS)return {type:"ASCII 29",verdict:"Good",note:"Real group separator present. Best for variable-length AIs such as 10 and 21."};
+      if(hasTilde)return {type:"Printable ~ placeholder",verdict:"Acceptable with configuration",note:"Placeholder separator found. Can be workable when scanner/FO mapping treats ~ consistently."};
+      return {type:"No separator",verdict:"Not suitable",note:"No separator found. Variable-length AIs can collapse into a single field and break FO scenarios."};
+    }
+
+    function stripPrefix(value){return value.replace(/^](C1|d2|Q3)/,"")}
+
+    function nextKnownAIAt(payload,pos){const tok=payload.slice(pos,pos+2);return knownAIs.includes(tok)?tok:null}
+
+    function parseVariableValue(payload,start,maxLen){
+      let i=start;
+      while(i<payload.length&&(i-start)<maxLen){
+        if(payload.charCodeAt(i)===29)return {value:payload.slice(start,i),nextIndex:i+1,terminatedByGS:true,truncated:false};
+        const candidate=nextKnownAIAt(payload,i);
+        if(candidate)return {value:payload.slice(start,i),nextIndex:i,terminatedByGS:false,truncated:false,terminatedByAI:true};
+        i+=1;
+      }
+      return {value:payload.slice(start,i),nextIndex:i,terminatedByGS:false,truncated:i-start>=maxLen};
+    }
+
+    function parseGS1(value){
+      const payload=stripPrefix(value).replace(/\n/g,"").trim().replace(/~/g,GS);
+      const out=[],errors=[],warnings=[]; let i=0;
+      while(i<payload.length){
+        if(payload.charCodeAt(i)===29){i+=1;continue}
+        const ai=payload.slice(i,i+2),spec=aiSpecs[ai];
+        if(!spec){errors.push(`Unknown or unexpected AI near index ${i}: '${payload.slice(i,i+6)}'`);break}
+        i+=2;
+        let valuePart="",meta={};
+        if(spec.fixed){valuePart=payload.slice(i,i+spec.fixed);i+=spec.fixed;if(valuePart.length!==spec.fixed)errors.push(`AI ${ai} incomplete. Expected ${spec.fixed} chars, got ${valuePart.length}.`)}
+        else {
+          const parsed=parseVariableValue(payload,i,spec.variable);valuePart=parsed.value;i=parsed.nextIndex;meta=parsed;
+          if(parsed.truncated)warnings.push(`AI ${ai} reached max length (${spec.variable}) before separator.`);
+          if(parsed.terminatedByAI&&!parsed.terminatedByGS)warnings.push(`AI ${ai} inferred boundary from next AI, not explicit GS separator.`);
+          if(!parsed.terminatedByGS && !parsed.terminatedByAI && i<payload.length)warnings.push(`AI ${ai} may have ambiguous termination.`);
+        }
+        const ok=spec.validator(valuePart);
+        out.push({ai,label:spec.label,value:valuePart,valid:ok,help:spec.help});
+        if(!ok)errors.push(`AI ${ai} (${spec.label}) malformed value '${valuePart}' (${spec.help}).`);
+      }
+      const hasCore=out.some(x=>x.ai==="01")&&out.some(x=>x.ai==="17");
+      const varAIPresent=out.some(x=>variableAIs.has(x.ai));
+      return {parsed:out,errors,warnings,status:out.length?(errors.length?"Partial":"Parsed"):"Failed",hasCore,varAIPresent};
+    }
+
+    function computeVerdict(analysis,value){
+      const prefixOk=analysis.prefix.detected!=="Missing";
+      const separator=analysis.separator.verdict;
+      const parse=analysis.parsed;
+      const hasUnknownCtrl=/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/.test(value.replace(new RegExp(GS,"g"),""));
+      const variableRisk=parse.varAIPresent&&separator==="Not suitable";
+
+      let finalVerdict="Not suitable",readiness="Not ready",breakdown="Needs different hardware",reasons=[];
+
+      if(prefixOk&&separator==="Good"&&parse.status==="Parsed"&&parse.errors.length===0&&!hasUnknownCtrl&&parse.hasCore){
+        finalVerdict="Suitable";readiness="Ready";breakdown="Good for FO GS1 pilot";
+      } else if((prefixOk||parse.status!=="Failed")&&separator!=="Not suitable"&&!hasUnknownCtrl){
+        finalVerdict="Suitable with configuration";readiness="Partial";breakdown="Needs scanner reconfiguration";
+      } else if(parse.status!=="Failed"&&!variableRisk){
+        finalVerdict="Suitable with configuration";readiness="Partial";breakdown="Good only for simple linear barcodes";
+      }
+
+      if(!prefixOk) reasons.push("AIM prefix missing; enable prefix output when possible.");
+      if(separator==="Acceptable with configuration") reasons.push("Using '~' placeholder. Validate mapping consistency in FO input profile.");
+      if(variableRisk) reasons.push("Variable-length AIs detected without usable separator.");
+      if(parse.errors.length) reasons.push("GS1 parse errors found; scanner output format may be broken.");
+      if(hasUnknownCtrl) reasons.push("Unexpected control characters detected.");
+      if(!parse.hasCore) reasons.push("Core AIs 01 and 17 are not both present in this scan.");
+      if(!reasons.length) reasons.push("No critical issues detected for this scan pattern.");
+
+      return {finalVerdict,readiness,breakdown,consistency:hasUnknownCtrl?"Warning":"Good",reasons};
+    }
+
+    function renderPanels(a){
+      el("prefixPanel").innerHTML=`<div class="kv"><strong>Detected prefix</strong><span>${a.prefix.detected==="Missing"?createBadge("Missing"):`<code>${a.prefix.detected}</code>`}</span></div><div class="kv"><strong>Likely family</strong><span>${a.prefix.family}</span></div><div class="kv"><strong>FO suitability signal</strong><span>${createBadge(a.prefix.suitable)}</span></div><p class="small">${a.prefix.note}</p>`;
+      el("separatorPanel").innerHTML=`<div class="kv"><strong>Separator detection</strong><span>${a.separator.type}</span></div><div class="kv"><strong>Separator verdict</strong><span>${createBadge(a.separator.verdict)}</span></div><p class="small">${a.separator.note}</p>`;
+
+      const parsedRows=a.parsed.parsed.length?a.parsed.parsed.map(r=>`<tr><td>${r.ai}</td><td>${r.label}</td><td><code>${escapeHtml(r.value)}</code></td><td>${r.valid?createBadge("Good"):createBadge("Warning")}</td><td>${r.help}</td></tr>`).join(""):`<tr><td colspan="5" class="muted">No parse result yet.</td></tr>`;
+      const parserNotes=[...a.parsed.errors,...a.parsed.warnings].length?`<ul class="list">${[...a.parsed.errors,...a.parsed.warnings].map(e=>`<li>${escapeHtml(e)}</li>`).join("")}</ul>`:`<p class="small">No parser issues detected.</p>`;
+      el("parserPanel").innerHTML=`<div class="kv"><strong>Parsing status</strong><span>${createBadge(a.parsed.status)}</span></div><div class="kv"><strong>Core AIs (01 + 17)</strong><span>${a.parsed.hasCore?createBadge("Good"):createBadge("Warning")}</span></div><table><thead><tr><th>AI</th><th>Field</th><th>Value</th><th>Validation</th><th>Format</th></tr></thead><tbody>${parsedRows}</tbody></table><h4 style="margin:10px 0 6px">Parser notes</h4>${parserNotes}`;
+
+      el("verdictPanel").innerHTML=`<div class="kv"><strong>Final classification</strong><span>${createBadge(a.verdict.finalVerdict)}</span></div><div class="kv"><strong>Scanner readiness</strong><span>${createBadge(a.verdict.readiness)}</span></div><div class="kv"><strong>Output consistency</strong><span>${createBadge(a.verdict.consistency)}</span></div><div class="kv"><strong>Diagnostic breakdown</strong><span>${a.verdict.breakdown}</span></div><h4 style="margin:10px 0 6px">Actionable diagnostics</h4><ul class="list">${a.verdict.reasons.map(r=>`<li>${escapeHtml(r)}</li>`).join("")}</ul>`;
+    }
+
+    function renderSummary(a){
+      const cards=[["Scanner readiness",a.verdict.readiness],["Prefix status",a.prefix.detected==="Missing"?"Missing":"Detected"],["Separator status",a.separator.verdict],["Parsing status",a.parsed.status],["Overall verdict",a.verdict.finalVerdict]];
+      el("summaryCards").innerHTML=cards.map(([t,v])=>`<article class="summary-card"><h4>${t}</h4><div class="summary-value">${createBadge(v)}</div></article>`).join("");
+    }
+
+    function renderCatalog(filter=""){
+      el("typeCatalog").innerHTML=scannerTypes.map(t=>`<article class="catalog-card"><h4>${t.name}</h4><p class="small" style="margin-top:6px">Suitability: ${createBadge(t.suitability)}</p><p class="small" style="margin-top:6px"><strong>Typical use case:</strong> ${t.useCase}</p><p class="small" style="margin-top:6px"><strong>Advantages:</strong> ${t.advantages}</p><p class="small" style="margin-top:6px"><strong>Limitations:</strong> ${t.limitations}</p><p class="small" style="margin-top:6px"><strong>FO recommendation:</strong> ${t.recommendation}</p></article>`).join("");
+      const q=filter.trim().toLowerCase(); const rows=deviceFamilies.filter(r=>!q||r.join(" ").toLowerCase().includes(q));
+      el("deviceCatalogBody").innerHTML=rows.map(r=>`<tr>${r.map(v=>`<td>${v}</td>`).join("")}</tr>`).join("")||`<tr><td colspan="7" class="muted">No matching device families.</td></tr>`;
+    }
+    function filterCatalog(){renderCatalog(el("catalogFilter").value)}
+
+    function addCurrentToLog(){if(!state.lastResult)return;state.log.unshift({timestamp:new Date().toISOString(),rawOutput:state.lastScan,detectedPrefix:state.lastResult.prefix.detected,separatorResult:state.lastResult.separator.verdict,parsedAIs:state.lastResult.parsed.parsed,finalVerdict:state.lastResult.verdict.finalVerdict});renderLog()}
+    function renderLog(){el("logTableBody").innerHTML=state.log.map(e=>`<tr><td>${e.timestamp}</td><td>${e.detectedPrefix}</td><td>${e.separatorResult}</td><td>${e.finalVerdict}</td><td><code>${escapeHtml(renderVisibleChars(e.rawOutput))}</code></td></tr>`).join("")||`<tr><td colspan="5" class="muted">No session entries yet.</td></tr>`}
+    function downloadFile(name,content,mime){const blob=new Blob([content],{type:mime});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=name;a.click();URL.revokeObjectURL(url)}
+    function exportLog(mode){if(!state.log.length)return;if(mode==="json")downloadFile("scanner_validation_session_log.json",JSON.stringify(state.log,null,2),"application/json");else{const text=state.log.map((e,idx)=>[`Entry ${idx+1}`,`Timestamp: ${e.timestamp}`,`Raw output: ${renderVisibleChars(e.rawOutput)}`,`Detected prefix: ${e.detectedPrefix}`,`Separator result: ${e.separatorResult}`,`Parsed AIs: ${e.parsedAIs.map(ai=>`${ai.ai}=${ai.value}`).join(", ")}`,`Final verdict: ${e.finalVerdict}`,"---"].join("\n")).join("\n");downloadFile("scanner_validation_session_log.txt",text,"text/plain")}}
+
+    function wireEvents(){
+      const scanInput=el("scanInput");scanInput.addEventListener("input",()=>captureInput(scanInput.value));
+      el("clearBtn").onclick=()=>{scanInput.value="";captureInput("");scanInput.focus()};
+      el("copyBtn").onclick=async()=>{try{await navigator.clipboard.writeText(state.lastScan||"")}catch(_){}};
+      el("sample128Btn").onclick=()=>setSample(sampleScans.gs1128);el("sampleDmBtn").onclick=()=>setSample(sampleScans.gs1dm);el("sampleSerialBtn").onclick=()=>setSample(sampleScans.serial);el("sampleBadBtn").onclick=()=>setSample(sampleScans.malformed);
+      el("catalogFilter").addEventListener("input",filterCatalog);
+      el("addLogBtn").onclick=addCurrentToLog;el("clearLogBtn").onclick=()=>{state.log=[];renderLog()};el("exportTxtBtn").onclick=()=>exportLog("txt");el("exportJsonBtn").onclick=()=>exportLog("json");
+    }
+
+    function setSample(sample){el("scanInput").value=sample;captureInput(sample);el("scanInput").focus()}
+    function init(){wireEvents();renderCatalog();renderTestSymbols();captureInput("");el("scanInput").focus()}
+    init();
+  </script>
+</body>
+</html>
